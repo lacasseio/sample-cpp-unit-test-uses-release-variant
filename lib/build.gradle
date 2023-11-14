@@ -1,0 +1,9 @@
+plugins {
+    id 'cpp-library'
+    id 'cpp-unit-test'
+    id 'com.example.release-testing'
+}
+
+library {
+    targetMachines.add(machines.macOS.x86_64)
+}

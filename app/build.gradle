@@ -1,0 +1,12 @@
+plugins {
+    id 'cpp-application'
+    id 'cpp-unit-test'
+    id 'com.example.release-testing'
+}
+
+testsAgainst.release()
+
+application {
+    targetMachines.add(machines.macOS.x86_64)
+}
+

@@ -1,0 +1,6 @@
+pluginManagement {
+    includeBuild 'release-testing-plugin'
+}
+rootProject.name = 'sample-cpp-unit-test-uses-release-variant'
+include 'app'
+include 'lib'
