@@ -3,7 +3,6 @@ import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.FileCollectionDependency;
-import org.gradle.api.attributes.Attribute;
 import org.gradle.api.attributes.AttributeContainer;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.provider.Property;
@@ -92,7 +91,18 @@ public /*final*/ abstract class ReleaseTestingPlugin implements Plugin<Project> 
                         final Configuration linkConfiguration = project.getConfigurations().getByName("nativeLink" + capitalize(qualifyingName(testBinary)));
 
                         // Assuming a single FileCollectionDependency which should be the Gradle core object files
-                        linkConfiguration.getDependencies().removeIf(it -> it instanceof FileCollectionDependency);
+                        //   In cases where this code executes *before* normal Gradle code (for some reason),
+                        //   we can remove the Gradle (previous) testableObjects dependency to replace it with our own.
+                        //   Note that we should normally be able to inspect the dependencies directly via:
+                        //     linkConfiguration.getDependencies().removeIf(it -> it instanceof FileCollectionDependency);
+                        //   Instead we remove any current and future, FileCollectionDependency that doesn't match our testableObjects.
+                        linkConfiguration.getDependencies().all(it -> {
+                            if (it instanceof FileCollectionDependency) {
+                                if (!((FileCollectionDependency) it).getFiles().equals(testableObjects)) {
+                                    linkConfiguration.getDependencies().remove(it);
+                                }
+                            }
+                        });
                         linkConfiguration.getDependencies().add(project.getDependencies().create(testableObjects));
 
                         linkConfiguration.attributes(optimizedFrom(testedBinary));
