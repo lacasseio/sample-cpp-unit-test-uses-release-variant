@@ -19,6 +19,8 @@ import org.gradle.language.nativeplatform.tasks.UnexportMainSymbol;
 import org.gradle.nativeplatform.test.cpp.CppTestExecutable;
 import org.gradle.nativeplatform.test.cpp.CppTestSuite;
 
+import java.util.concurrent.Callable;
+
 public /*final*/ abstract class ReleaseTestingPlugin implements Plugin<Project> {
     public abstract static class TestAgainstExtension {
         public abstract Property<TestedBinarySpec> getTestedBinarySpec();
@@ -69,10 +71,19 @@ public /*final*/ abstract class ReleaseTestingPlugin implements Plugin<Project> 
                         // Recreate testable object file collection
                         final ConfigurableFileCollection testableObjects = project.getObjects().fileCollection();
                         if (testedComponent instanceof CppApplication) {
-                            final TaskProvider<UnexportMainSymbol> unexportMainSymbol = project.getTasks().named("relocateMainFor" + capitalize(qualifyingName(testBinary)), UnexportMainSymbol.class, task -> {
-                                task.getObjects().setFrom(testedBinary.getObjects());
+                            // In cases where the task `relocateMainFor*` doesn't exist (for some reason),
+                            //   we can configure the task only when it appears (by name) using `withType(<type>).configureEach(if (<name>) ...).
+                            //   That syntax replace `named(<name>, <type>, ...)`.
+                            //   When wiring the value through `testableObjects` we can use a `Callable` to further defer the task query by name.
+                            project.getTasks().withType(UnexportMainSymbol.class).configureEach(task -> {
+                                if (task.getName().equals("relocateMainFor" + capitalize(qualifyingName(testBinary)))) {
+                                    task.getObjects().setFrom(testedBinary.getObjects());
+                                }
                             });
-                            testableObjects.from(unexportMainSymbol.map(UnexportMainSymbol::getRelocatedObjects));
+                            testableObjects.from((Callable<?>) () -> {
+                                final TaskProvider<UnexportMainSymbol> unexportMainSymbol = project.getTasks().named("relocateMainFor" + capitalize(qualifyingName(testBinary)), UnexportMainSymbol.class);
+                                return unexportMainSymbol.map(UnexportMainSymbol::getRelocatedObjects);
+                            });
                         } else {
                             testableObjects.from(testedBinary.getObjects());
                         }
