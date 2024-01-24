@@ -1,7 +1,10 @@
+import org.gradle.api.Action;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.FileCollectionDependency;
+import org.gradle.api.attributes.Attribute;
+import org.gradle.api.attributes.AttributeContainer;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.provider.Property;
 import org.gradle.api.specs.Spec;
@@ -56,27 +59,50 @@ public /*final*/ abstract class ReleaseTestingPlugin implements Plugin<Project> 
                     return; // nothing to do
                 }
 
-                testedComponent.getBinaries().whenElementFinalized(testedBinary -> {
-                    if (!isTestedBinary(testBinary, testedComponent, testedBinary) || !extension.getTestedBinarySpec().get().isSatisfiedBy(testedBinary)) {
-                        return;
+                testedComponent.getBinaries().whenElementFinalized(new Action<CppBinary>() {
+                    @Override
+                    public void execute(CppBinary testedBinary) {
+                        if (!isTestedBinary(testBinary, testedComponent, testedBinary) || !extension.getTestedBinarySpec().get().isSatisfiedBy(testedBinary)) {
+                            return;
+                        }
+
+                        // Recreate testable object file collection
+                        final ConfigurableFileCollection testableObjects = project.getObjects().fileCollection();
+                        if (testedComponent instanceof CppApplication) {
+                            final TaskProvider<UnexportMainSymbol> unexportMainSymbol = project.getTasks().named("relocateMainFor" + capitalize(qualifyingName(testBinary)), UnexportMainSymbol.class, task -> {
+                                task.getObjects().setFrom(testedBinary.getObjects());
+                            });
+                            testableObjects.from(unexportMainSymbol.map(UnexportMainSymbol::getRelocatedObjects));
+                        } else {
+                            testableObjects.from(testedBinary.getObjects());
+                        }
+
+                        //region nativeLink configuration
+                        final Configuration linkConfiguration = project.getConfigurations().getByName("nativeLink" + capitalize(qualifyingName(testBinary)));
+
+                        // Assuming a single FileCollectionDependency which should be the Gradle core object files
+                        linkConfiguration.getDependencies().removeIf(it -> it instanceof FileCollectionDependency);
+                        linkConfiguration.getDependencies().add(project.getDependencies().create(testableObjects));
+
+                        linkConfiguration.attributes(optimizedFrom(testedBinary));
+                        //endregion
+
+                        //region cppCompile configuration
+                        final Configuration compileConfiguration = project.getConfigurations().getByName("cppCompile" + capitalize(qualifyingName(testBinary)));
+
+                        compileConfiguration.attributes(optimizedFrom(testedBinary));
+                        //endregion
+
+                        //region nativeRuntime configuration
+                        final Configuration runtimeConfiguration = project.getConfigurations().getByName("nativeRuntime" + capitalize(qualifyingName(testBinary)));
+
+                        runtimeConfiguration.attributes(optimizedFrom(testedBinary));
+                        //endregion
                     }
 
-                    // Recreate testable object file collection
-                    final ConfigurableFileCollection testableObjects = project.getObjects().fileCollection();
-                    if (testedComponent instanceof CppApplication) {
-                        final TaskProvider<UnexportMainSymbol> unexportMainSymbol = project.getTasks().named("relocateMainFor" + capitalize(qualifyingName(testBinary)), UnexportMainSymbol.class, task -> {
-                            task.getObjects().setFrom(testedBinary.getObjects());
-                        });
-                        testableObjects.from(unexportMainSymbol.map(UnexportMainSymbol::getRelocatedObjects));
-                    } else {
-                        testableObjects.from(testedBinary.getObjects());
+                    private Action<AttributeContainer> optimizedFrom(CppBinary testedBinary) {
+                        return attributes -> attributes.attribute(CppBinary.OPTIMIZED_ATTRIBUTE, testedBinary.isOptimized());
                     }
-
-                    final Configuration linkConfiguration = project.getConfigurations().getByName("nativeLink" + capitalize(qualifyingName(testBinary)));
-
-                    // Assuming a single FileCollectionDependency which should be the Gradle core object files
-                    linkConfiguration.getDependencies().removeIf(it -> it instanceof FileCollectionDependency);
-                    linkConfiguration.getDependencies().add(project.getDependencies().create(testableObjects));
                 });
             });
 
