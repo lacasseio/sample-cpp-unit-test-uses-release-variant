@@ -1,7 +1,7 @@
 plugins {
+    id 'com.example.release-testing'
     id 'cpp-application'
     id 'cpp-unit-test'
-    id 'com.example.release-testing'
 }
 
 testsAgainst.release()

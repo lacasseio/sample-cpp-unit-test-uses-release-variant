@@ -19,8 +19,6 @@ import org.gradle.language.nativeplatform.tasks.UnexportMainSymbol;
 import org.gradle.nativeplatform.test.cpp.CppTestExecutable;
 import org.gradle.nativeplatform.test.cpp.CppTestSuite;
 
-import java.util.concurrent.Callable;
-
 public /*final*/ abstract class ReleaseTestingPlugin implements Plugin<Project> {
     public abstract static class TestAgainstExtension {
         public abstract Property<TestedBinarySpec> getTestedBinarySpec();
@@ -48,6 +46,12 @@ public /*final*/ abstract class ReleaseTestingPlugin implements Plugin<Project> 
 
     @Override
     public void apply(Project project) {
+        // Required to ensure cpp-unit-test plugin's configuration executes before our configuration.
+        //   It gives a chance to Gradle to wire the testableObjects so we can rewire them without too much gymnastic
+        project.getPluginManager().withPlugin("cpp-unit-test", __ -> doApply(project));
+    }
+
+    private void doApply(Project project) {
         final TestAgainstExtension extension = project.getExtensions().create("testsAgainst", TestAgainstExtension.class);
 
         // Use to Gradle core default
@@ -92,38 +96,16 @@ public /*final*/ abstract class ReleaseTestingPlugin implements Plugin<Project> 
                     // Recreate testable object file collection
                     final ConfigurableFileCollection testableObjects = project.getObjects().fileCollection();
                     if (testedComponent instanceof CppApplication) {
-                        // In cases where the task `relocateMainFor*` doesn't exist (for some reason),
-                        //   we can configure the task only when it appears (by name) using `withType(<type>).configureEach(if (<name>) ...).
-                        //   That syntax replace `named(<name>, <type>, ...)`.
-                        //   When wiring the value through `testableObjects` we can use a `Callable` to further defer the task query by name.
-                        project.getTasks().withType(UnexportMainSymbol.class).configureEach(task -> {
-                            if (task.getName().equals("relocateMainFor" + capitalize(qualifyingName(testBinary)))) {
-                                task.getObjects().setFrom(testedBinary.getObjects());
-                            }
+                        final TaskProvider<UnexportMainSymbol> unexportMainSymbol = project.getTasks().named("relocateMainFor" + capitalize(qualifyingName(testBinary)), UnexportMainSymbol.class, task -> {
+                            task.getObjects().setFrom(testedBinary.getObjects());
                         });
-                        testableObjects.from((Callable<?>) () -> {
-                            final TaskProvider<UnexportMainSymbol> unexportMainSymbol = project.getTasks().named("relocateMainFor" + capitalize(qualifyingName(testBinary)), UnexportMainSymbol.class);
-                            return unexportMainSymbol.map(UnexportMainSymbol::getRelocatedObjects);
-                        });
+                        testableObjects.from(unexportMainSymbol.map(UnexportMainSymbol::getRelocatedObjects));
                     } else {
                         testableObjects.from(testedBinary.getObjects());
                     }
 
                     final Configuration linkConfiguration = project.getConfigurations().getByName("nativeLink" + capitalize(qualifyingName(testBinary)));
-
-                    // Assuming a single FileCollectionDependency which should be the Gradle core object files
-                    //   In cases where this code executes *before* normal Gradle code (for some reason),
-                    //   we can remove the Gradle (previous) testableObjects dependency to replace it with our own.
-                    //   Note that we should normally be able to inspect the dependencies directly via:
-                    //     linkConfiguration.getDependencies().removeIf(it -> it instanceof FileCollectionDependency);
-                    //   Instead we remove any current and future, FileCollectionDependency that doesn't match our testableObjects.
-                    linkConfiguration.getDependencies().all(it -> {
-                        if (it instanceof FileCollectionDependency) {
-                            if (!((FileCollectionDependency) it).getFiles().equals(testableObjects)) {
-                                linkConfiguration.getDependencies().remove(it);
-                            }
-                        }
-                    });
+                    linkConfiguration.getDependencies().removeIf(it -> it instanceof FileCollectionDependency);
                     linkConfiguration.getDependencies().add(project.getDependencies().create(testableObjects));
                 });
             });
