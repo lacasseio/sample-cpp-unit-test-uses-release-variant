@@ -6,6 +6,7 @@ import org.gradle.api.artifacts.FileCollectionDependency;
 import org.gradle.api.attributes.AttributeContainer;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.provider.Property;
+import org.gradle.api.provider.Provider;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.TaskProvider;
 import org.gradle.language.cpp.CppApplication;
@@ -53,6 +54,29 @@ public /*final*/ abstract class ReleaseTestingPlugin implements Plugin<Project> 
         extension.getTestedBinarySpec().convention(TestAgainstExtension.TestedBinarySpec.DEBUG);
 
         project.getComponents().withType(CppTestSuite.class).configureEach(testSuite -> {
+            testSuite.getBinaries().whenElementKnown(CppTestExecutable.class, new Action<CppTestExecutable>() {
+                @Override
+                public void execute(CppTestExecutable testBinary) {
+                    //region nativeLink configuration
+                    final Configuration linkConfiguration = project.getConfigurations().getByName("nativeLink" + capitalize(qualifyingName(testBinary)));
+                    linkConfiguration.attributes(optimizedFrom(extension.getTestedBinarySpec()));
+                    //endregion
+
+                    //region cppCompile configuration
+                    final Configuration compileConfiguration = project.getConfigurations().getByName("cppCompile" + capitalize(qualifyingName(testBinary)));
+                    compileConfiguration.attributes(optimizedFrom(extension.getTestedBinarySpec()));
+                    //endregion
+
+                    //region nativeRuntime configuration
+                    final Configuration runtimeConfiguration = project.getConfigurations().getByName("nativeRuntime" + capitalize(qualifyingName(testBinary)));
+                    runtimeConfiguration.attributes(optimizedFrom(extension.getTestedBinarySpec()));
+                    //endregion
+                }
+
+                private Action<AttributeContainer> optimizedFrom(Provider<TestAgainstExtension.TestedBinarySpec> testedSpec) {
+                    return attributes -> attributes.attributeProvider(CppBinary.OPTIMIZED_ATTRIBUTE, testedSpec.map(TestAgainstExtension.TestedBinarySpec.RELEASE::equals));
+                }
+            });
             testSuite.getBinaries().whenElementKnown(CppTestExecutable.class, testBinary -> {
                 // Note: we can't use testedComponent property because it's internal
                 final ProductionCppComponent testedComponent = (ProductionCppComponent) project.getComponents().findByName("main");
@@ -87,7 +111,6 @@ public /*final*/ abstract class ReleaseTestingPlugin implements Plugin<Project> 
                             testableObjects.from(testedBinary.getObjects());
                         }
 
-                        //region nativeLink configuration
                         final Configuration linkConfiguration = project.getConfigurations().getByName("nativeLink" + capitalize(qualifyingName(testBinary)));
 
                         // Assuming a single FileCollectionDependency which should be the Gradle core object files
@@ -104,25 +127,6 @@ public /*final*/ abstract class ReleaseTestingPlugin implements Plugin<Project> 
                             }
                         });
                         linkConfiguration.getDependencies().add(project.getDependencies().create(testableObjects));
-
-                        linkConfiguration.attributes(optimizedFrom(testedBinary));
-                        //endregion
-
-                        //region cppCompile configuration
-                        final Configuration compileConfiguration = project.getConfigurations().getByName("cppCompile" + capitalize(qualifyingName(testBinary)));
-
-                        compileConfiguration.attributes(optimizedFrom(testedBinary));
-                        //endregion
-
-                        //region nativeRuntime configuration
-                        final Configuration runtimeConfiguration = project.getConfigurations().getByName("nativeRuntime" + capitalize(qualifyingName(testBinary)));
-
-                        runtimeConfiguration.attributes(optimizedFrom(testedBinary));
-                        //endregion
-                    }
-
-                    private Action<AttributeContainer> optimizedFrom(CppBinary testedBinary) {
-                        return attributes -> attributes.attribute(CppBinary.OPTIMIZED_ATTRIBUTE, testedBinary.isOptimized());
                     }
                 });
             });

@@ -4,3 +4,5 @@ pluginManagement {
 rootProject.name = 'sample-cpp-unit-test-uses-release-variant'
 include 'app'
 include 'lib'
+include 'libTest'
+include 'testApp'
